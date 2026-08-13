@@ -1,0 +1,20 @@
+{
+  "name": "hr-onboarding-agent-server",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev":   "node --watch index.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk":        "^0.27.0",
+    "@neondatabase/serverless":  "^0.9.0",
+    "@upstash/redis":            "^1.28.0",
+    "bottleneck":                "^2.19.5",
+    "cors":                      "^2.8.5",
+    "dotenv":                    "^16.4.5",
+    "express":                   "^4.18.2",
+    "uuid":                      "^9.0.0",
+    "zod":                       "^3.22.4"
+  }
+}
