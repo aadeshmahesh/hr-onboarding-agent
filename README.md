@@ -829,3 +829,213 @@ Scenario 4 — Retry test:
   Agent retries only incomplete steps
   Already-completed steps skipped (idempotency) ✅
 ```
+
+---
+
+## Demo vs Production — What's Different
+
+### What We Built (Demo)
+```
+Single row overwrite    → simple, works for demo
+Plain text messages[]   → fine for sample data
+No connection pooling   → single connection
+No conflict handling    → blind overwrite
+No audit trail          → no tracking
+No data retention       → stored forever
+Basic error handling    → good enough locally
+```
+
+---
+
+### 1. Never Store Raw messages[] in DB
+```
+Problem:
+  messages[] contains employee PII
+  name, email, role → plain text in DB ❌
+
+Production fix:
+  Encrypt before saving
+  Decrypt before loading
+
+// Before save
+const encrypted = encrypt(JSON.stringify(messages), SECRET_KEY);
+await sql`UPDATE sessions SET messages = ${encrypted}`;
+
+// Before load
+const messages = JSON.parse(decrypt(row.messages, SECRET_KEY));
+```
+
+---
+
+### 2. DB Connection Pooling
+```
+Demo:
+  Single connection → breaks under load ❌
+
+Production:
+  Connection pool → reuse connections
+  PgBouncer or Neon's built-in pooling
+
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  max:              20,     // max connections
+  idleTimeoutMillis: 30000,
+});
+```
+
+---
+
+### 3. Row Versioning (Optimistic Locking)
+```
+Demo:
+  Overwrite blindly → data loss if two
+  requests hit same session ❌
+
+Production:
+  Add version column
+  Only update if version matches
+
+ALTER TABLE sessions ADD COLUMN version INT DEFAULT 0;
+
+UPDATE sessions SET
+  messages = $1,
+  version  = version + 1   -- increment
+WHERE session_id = $2
+AND   version    = $3;      -- must match current
+
+-- If 0 rows updated → conflict → retry
+```
+
+---
+
+### 4. Soft Delete Not Hard Delete
+```
+Demo:
+  DELETE FROM sessions WHERE session_id = $1 ❌
+
+Production:
+  Never delete — mark as deleted
+  Keep for audit trail
+
+ALTER TABLE sessions ADD COLUMN deleted_at TIMESTAMP NULL;
+
+-- "Delete"
+UPDATE sessions SET deleted_at = NOW()
+WHERE session_id = $1;
+
+-- Query (always exclude deleted)
+SELECT * FROM sessions
+WHERE session_id = $1
+AND deleted_at IS NULL;
+```
+
+---
+
+### 5. Audit Trail
+```
+Production needs to track:
+  Who started onboarding
+  Who approved or rejected
+  What changed and when
+
+CREATE TABLE session_audit (
+  id          SERIAL PRIMARY KEY,
+  session_id  TEXT NOT NULL,
+  action      TEXT NOT NULL,  -- started/approved/rejected/completed
+  actor       TEXT,           -- who did it
+  metadata    JSONB,
+  created_at  TIMESTAMP DEFAULT NOW()
+);
+```
+
+---
+
+### 6. Message Size Limit
+```
+Demo:
+  messages[] grows forever → no limit ❌
+
+Production:
+  Long sessions = huge JSONB → slow DB
+  Set max token budget
+  Summarize old messages if context too long
+
+if (messages.length > 50) {
+  const summary = await summarizeMessages(messages.slice(0, 40));
+  messages = [
+    { role: "user", content: "Previous context: " + summary },
+    ...messages.slice(-10)
+  ];
+}
+```
+
+---
+
+### 7. GDPR / Data Retention Policy
+```
+Employee data cannot stay in DB forever.
+
+ALTER TABLE sessions ADD COLUMN retain_until TIMESTAMP;
+ALTER TABLE sessions ADD COLUMN data_region  TEXT; -- US, EU
+
+-- Scheduled cleanup job
+DELETE FROM sessions
+WHERE retain_until < NOW()
+AND deleted_at IS NOT NULL;
+```
+
+---
+
+### 8. Every Turn Overwrites the Same Row
+```
+This is intentional — one row per session, always overwritten:
+
+Turn 1 saves: messages = [msg1, msg2, msg3]
+Turn 2 saves: messages = [msg1...msg6]      ← overwrite
+Turn 3 saves: messages = [msg1...msg8]      ← overwrite
+
+Why overwrite not append:
+  → Always ONE row per session (simple query)
+  → Always LATEST complete history
+  → Claude loads one row → full context ready
+  → No complex joins or ordering needed
+
+Production adds versioning ON TOP of this pattern
+to prevent blind overwrites under concurrent load.
+```
+
+---
+
+### Production Summary Table
+
+```
+Feature             Demo          Production
+────────────────────────────────────────────────
+Storage             Plain text    Encrypted ✅
+Connections         Single        Pool (20+) ✅
+Conflict handling   Overwrite     Versioned  ✅
+Deletion            Hard          Soft       ✅
+Audit trail         None          Full log   ✅
+Message size        Unlimited     Capped     ✅
+Data retention      Forever       Policy     ✅
+PII handling        Raw           Masked     ✅
+Sensitive data      Anthropic API Azure OpenAI + BAA ✅
+```
+
+---
+
+### Bottom Line
+
+```
+Demo:       one row, overwrite, simple ✅
+            Perfect for learning + portfolio
+
+Production: same pattern + safety layers:
+            Encrypt PII
+            Version conflicts
+            Soft delete
+            Audit everything
+            Retention policy
+            Connection pooling
+            HIPAA-compliant LLM (Azure OpenAI)
+```
