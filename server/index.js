@@ -119,14 +119,18 @@ app.get("/sessions", async (req, res) => {
   res.json({ sessions });
 });
 
-// Init DB then start
-initDB().then(() => {
-  app.listen(PORT, () => {
-    console.log(`\n✅ HR Onboarding Agent running on http://localhost:${PORT}`);
-    console.log(`   POST /onboard          Start onboarding`);
-    console.log(`   GET  /session/:id      Check session status`);
-    console.log(`   GET  /approve?token=.. Manager approval webhook`);
-    console.log(`   POST /webhook/approval JSON webhook`);
-    console.log(`   GET  /sessions         All sessions dashboard\n`);
+// Init DB then start (only when not in test mode)
+if (process.env.NODE_ENV !== "test") {
+  initDB().then(() => {
+    app.listen(PORT, () => {
+      console.log(`\n✅ HR Onboarding Agent running on http://localhost:${PORT}`);
+      console.log(`   POST /onboard          Start onboarding`);
+      console.log(`   GET  /session/:id      Check session status`);
+      console.log(`   GET  /approve?token=.. Manager approval webhook`);
+      console.log(`   POST /webhook/approval JSON webhook`);
+      console.log(`   GET  /sessions         All sessions dashboard\n`);
+    });
   });
-});
+}
+
+export default app;

@@ -829,3 +829,421 @@ Scenario 4 — Retry test:
   Agent retries only incomplete steps
   Already-completed steps skipped (idempotency) ✅
 ```
+
+---
+
+# Unit Testing Guide
+
+## How Tests Work
+
+```
+Unit test =
+  Real function +
+  Sample input +
+  Fake dependencies =
+  Predictable output to assert against ✅
+```
+
+---
+
+## How Jest Finds and Runs Tests
+
+```
+npm test
+  ↓
+Jest reads package.json for config
+  ↓
+finds testMatch pattern:
+  "**/__tests__/**/*.test.js"
+  ↓
+finds all test files automatically
+  ↓
+runs every describe() and test()
+  ↓
+reports pass/fail summary
+```
+
+You never call describe() or test() manually.
+Jest finds and runs them automatically.
+
+---
+
+## Test File Structure
+
+```javascript
+// 1. Import jest
+import { jest } from "@jest/globals";
+
+// 2. MOCK external dependencies FIRST
+//    (must be before imports)
+jest.unstable_mockModule("../../db.js", () => ({
+  isStepCompleted:   jest.fn(),
+  markStepCompleted: jest.fn(),
+}));
+
+// 3. Import modules AFTER mocking
+//    (so they get the fake versions)
+const { isStepCompleted } = await import("../../db.js");
+const { executeTool }     = await import("../../tools.js");
+
+// 4. Reset mocks before each test
+beforeEach(() => {
+  jest.clearAllMocks();
+  isStepCompleted.mockResolvedValue(null);
+});
+
+// 5. Group tests with describe
+describe("create_github_account", () => {
+
+  // 6. One test per scenario
+  test("returns success with username", async () => {
+    const result = await executeTool(...);
+    expect(result.success).toBe(true);
+  });
+
+});
+```
+
+---
+
+## Why Import Order Matters
+
+```
+If you import BEFORE mocking:
+  tools.js loads real db.js → real DB calls ❌
+
+If you import AFTER mocking:
+  tools.js loads fake db.js → controlled ✅
+
+Jest intercepts the import and
+swaps the real module with your fake one.
+```
+
+---
+
+## describe and test
+
+```javascript
+describe("get_employee_details", () => {
+//        ↑ GROUP NAME
+//          usually = function name you're testing
+//          Engineer defines this
+
+  test("returns employee data for valid ID", async () => {
+//      ↑ SCENARIO NAME
+//        what should happen in this case
+//        Engineer defines this
+
+    // Arrange → Act → Assert
+  });
+
+});
+```
+
+```
+Read together it makes a sentence:
+"get_employee_details returns employee data for valid ID"
+
+Terminal output:
+  get_employee_details
+    ✅ returns employee data for valid ID
+    ✅ saves step to completed_steps
+    ✅ returns cached result (idempotency)
+```
+
+---
+
+## What Engineer Defines vs What Jest Does
+
+```
+Engineer defines:
+  ✅ describe name   (what are you testing?)
+  ✅ test name       (what scenario?)
+  ✅ sample data     (what input?)
+  ✅ assertions      (what do you expect?)
+
+Jest does automatically:
+  ✅ finds test files
+  ✅ runs describe()
+  ✅ runs beforeEach() before every test
+  ✅ runs test()
+  ✅ reports pass/fail
+```
+
+---
+
+## What's Real vs Fake in Tests
+
+```
+REAL (actually runs):
+  ✅ executeTool()     — your actual function
+  ✅ all logic inside  — your actual if/else
+  ✅ return values     — your actual output
+
+FAKE (mocked):
+  ❌ isStepCompleted() — fake DB lookup
+  ❌ markStepCompleted()— fake DB save
+  ❌ sample data       — not real employee
+```
+
+---
+
+## How jest.fn() Works
+
+```javascript
+// Creates a fake function that:
+//   → Does nothing by default
+//   → Records every call made to it
+//   → Can be told what to return
+
+// Tell it to return null (step not done)
+isStepCompleted.mockResolvedValue(null);
+
+// Tell it to return cached data (step done)
+isStepCompleted.mockResolvedValue({
+  name: "Priya Sharma", cached: true
+});
+```
+
+---
+
+## How Pass / Fail is Determined
+
+```
+No error thrown = PASS ✅
+Error thrown    = FAIL ❌
+
+expect() throws an error when
+condition is not met.
+Jest catches it → marks test failed.
+```
+
+### What Failure Looks Like
+
+```
+FAIL __tests__/unit/tools.test.js
+
+  ● get_employee_details
+    › returns employee data for valid ID
+
+    expect(received).toBeDefined()
+
+    Expected: not undefined
+    Received: undefined
+
+      28 | const result = await executeTool(...);
+    > 29 | expect(result.name).toBeDefined();
+         |                     ^
+
+  Tests: 1 failed, 55 passed
+```
+
+---
+
+## Arrange → Act → Assert Pattern
+
+```javascript
+test("skips if already completed", async () => {
+
+  // ARRANGE — set up the scenario
+  isStepCompleted.mockResolvedValue({
+    success: true, cached: true
+  });
+
+  // ACT — run the real function
+  const result = await executeTool(
+    "session-001",
+    "create_github_account",
+    { employee_name: "Priya", ... }
+  );
+
+  // ASSERT — check the output
+  expect(result.cached).toBe(true);
+  expect(markStepCompleted).not.toHaveBeenCalled();
+});
+```
+
+---
+
+## Jest Matchers — Built-in, No Imports Needed
+
+### Equality
+```javascript
+expect(result.status).toBe(200);
+expect(result.user).toEqual({ name: "Priya" });
+```
+
+### Existence
+```javascript
+expect(result.id).toBeDefined();
+expect(result.error).toBeUndefined();
+expect(result.data).toBeNull();
+```
+
+### Truthiness
+```javascript
+expect(result.success).toBeTruthy();
+expect(result.error).toBeFalsy();
+expect(result.success).toBe(true);
+```
+
+### Strings
+```javascript
+expect(result.url).toContain("github.com");
+expect(result.name).toMatch(/priya/i);
+```
+
+### Numbers
+```javascript
+expect(result.score).toBeGreaterThan(0);
+expect(result.count).toBeLessThan(100);
+expect(result.total).toBeGreaterThanOrEqual(5);
+```
+
+### Arrays
+```javascript
+expect(result.channels).toContain("#general");
+expect(result.items).toHaveLength(3);
+```
+
+### Objects
+```javascript
+expect(result).toMatchObject({
+  success:  true,
+  username: "priya.sharma",
+});
+```
+
+### Mocks
+```javascript
+expect(markStepCompleted).toHaveBeenCalled();
+expect(markStepCompleted).not.toHaveBeenCalled();
+expect(markStepCompleted).toHaveBeenCalledWith(
+  "session-001",
+  "create_github_account",
+  expect.any(Object)
+);
+expect(markStepCompleted).toHaveBeenCalledTimes(1);
+```
+
+### Errors
+```javascript
+expect(() => riskyFn()).toThrow();
+expect(() => riskyFn()).toThrow("specific message");
+```
+
+### .not Modifier — Flip Any Matcher
+```javascript
+expect(result.error).not.toBeDefined();
+expect(result.cached).not.toBe(true);
+expect(fn).not.toHaveBeenCalled();
+```
+
+---
+
+## beforeEach — Why It's Critical
+
+```javascript
+beforeEach(() => {
+  jest.clearAllMocks();
+  isStepCompleted.mockResolvedValue(null);
+});
+
+// Without this:
+//   Test 1 sets mock to return cached data
+//   Test 2 runs → still returns cached data ❌
+//   Tests affect each other → unreliable ❌
+
+// With this:
+//   Every test starts completely fresh ✅
+//   Tests are fully independent ✅
+```
+
+---
+
+## Test File Checklist
+
+```
+Every test file should have:
+
+  ✅ Mocks at the top (before imports)
+  ✅ Imports after mocks
+  ✅ beforeEach to reset mocks
+  ✅ describe blocks to group tests
+  ✅ test() for each scenario
+  ✅ Arrange → Act → Assert pattern
+
+Minimum tests per function:
+  ✅ Happy path   (success case)
+  ✅ Edge case    (empty, missing data)
+  ✅ Error case   (failure handling)
+  ✅ Idempotency  (if applicable)
+```
+
+---
+
+## Test Suite Structure
+
+```
+server/
+  __tests__/
+    unit/
+      tools.test.js    → 30 tests — all 10 tools
+      email.test.js    → 12 tests — approval/welcome/reject emails
+      db.test.js       →  7 tests — SESSION_STATES validation
+    integration/
+      api.test.js      → 17 tests — all Express endpoints
+
+Total: 56 tests ✅
+```
+
+---
+
+## Run Tests
+
+```bash
+# Run all tests
+npm test
+
+# Watch mode (re-runs on file change)
+npm run test:watch
+
+# With coverage report
+npm run test:coverage
+```
+
+---
+
+## Why Mock External Dependencies?
+
+```
+Real DB / API problems:        Mock benefits:
+  DB might be down ❌            Always available ✅
+  Data changes over time ❌      Never changes ✅
+  Slow network ❌                Instant ✅
+  Costs money ❌                 Free ✅
+  Hard to control ❌             Predictable ✅
+```
+
+---
+
+## Interview Answer
+
+```
+"How do you approach unit testing?"
+
+"I test behavior in isolation.
+Each test covers one scenario —
+happy path, error case, edge case.
+
+I mock all external dependencies
+(DB, APIs, email) so tests run
+offline in milliseconds.
+
+I use beforeEach to reset mocks
+between tests to prevent test leakage.
+
+For integration tests I use
+Supertest to hit real Express
+endpoints with mocked dependencies."
+```
