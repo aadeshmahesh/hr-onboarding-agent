@@ -1382,26 +1382,6 @@ Real DB / API problems:        Mock benefits:
 
 ---
 
-## Interview Answer
-
-```
-"How do you approach unit testing?"
-
-"I test behavior in isolation.
-Each test covers one scenario —
-happy path, error case, edge case.
-
-I mock all external dependencies
-(DB, APIs, email) so tests run
-offline in milliseconds.
-
-I use beforeEach to reset mocks
-between tests to prevent test leakage.
-
-For integration tests I use
-Supertest to hit real Express
-endpoints with mocked dependencies."
-```
 ### Bottom Line
 
 ```
